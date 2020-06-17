@@ -33,13 +33,27 @@ namespace Configure::Manager {
 	public:
 	    static Cabinet Fetch(const std::filesystem::path& home, const std::string& uri);
 	    static Cabinet Open(const std::filesystem::path& home);
+	    [[nodiscard]] auto& Namespace() const noexcept { return mNs; }
 	    void Add(const std::string& uri, const std::string& name, const std::string& display);
 	    void Remove(const std::string& name);
-	    Module* Get(const std::string& name);
-	    template <class Fn>
-	    void Enumerate(Fn fn) { for (auto&& [_, x]: mModules) fn(x); }
+	    [[nodiscard]] Module* Get(const std::string& name);
+	    template <class Fn> void Enumerate(Fn fn) { for (auto&& [_, x]: mModules) fn(x); }
 	private:
+	    std::string mNs;
 	    std::filesystem::path mHome;
 	    std::unordered_map<std::string, Module> mModules;
     };
+
+	class Warehouse {
+    public:
+        explicit Warehouse(const std::filesystem::path& home);
+        void ImportCabinet(const std::string& uri);
+        void RemoveCabinet(const std::string& name);
+        [[nodiscard]] Cabinet* GetCabinet(const std::string& name);
+        template <class Fn> void EnumerateCabinets(Fn fn) { for (auto&& [_, x]: mCabinets) fn(x); }
+	private:
+	    void Load(const std::filesystem::path& path);
+        std::filesystem::path mHome;
+        std::unordered_map<std::string, Cabinet> mCabinets;
+	};
 }

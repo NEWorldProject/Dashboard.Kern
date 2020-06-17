@@ -8,4 +8,5 @@ int main() {
     //auto repo = Cabinet::Fetch(path+"/home", "https://github.com/NEWorldProject/Cabinet");
     auto repo = Cabinet::Open(path+"/home");
     repo.Get("NRT")->Update();
+    std::cout << repo.Namespace() << std::endl;
 }
