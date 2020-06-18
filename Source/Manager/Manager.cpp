@@ -4,6 +4,7 @@
 #include "Git2/Repository.h"
 #include <sstream>
 #include <unordered_set>
+#include "Utils/Exception.h"
 
 namespace {
     // Path Notes
@@ -136,6 +137,11 @@ namespace Configure::Manager {
         return result;
     }
 
+    void Cabinet::UpdateUnsafe() {
+        auto repo = Git2::Repository::Open(mHome/RepoPath);
+        repo.PullAuto({"DWVoid", "yshliu0321@icloud.com"}); // TODO: Add a config option for this
+    }
+
     void Cabinet::Add(const std::string& uri, const std::string& name, const std::string& display) {
         ValidateName(name);
         if (uri.empty()) throw std::runtime_error("Uri cannot be empty");
@@ -163,7 +169,7 @@ namespace Configure::Manager {
         return &i->second;
     }
 
-    Warehouse::Warehouse(const std::filesystem::path& home) {
+    Warehouse::Warehouse(const std::filesystem::path& home) : mHome(home) {
         const auto base = home/WarehouseDir;
         std::filesystem::create_directories(base);
         std::filesystem::create_directories(base/WarehouseTempDir);
@@ -190,10 +196,10 @@ namespace Configure::Manager {
         try {
             const auto cab = Cabinet::Fetch(tmpTarget, uri);
             // scan the namespace name against the list. if there is conflict, throw a runtime error with message
-            if (mCabinets.find(cab.Namespace())==mCabinets.end()) Corruption(MsgCabinetConflict);
+            if (mCabinets.find(cab.Namespace())!=mCabinets.end()) Corruption(MsgCabinetConflict);
             // move the cab
-            std::filesystem::rename(tmpTarget, stock/cab.Namespace());
             ns = cab.Namespace();
+            std::filesystem::rename(tmpTarget, stock/ns);
         }
         catch (...) {
             // in-case of exception, drop the temp cab dir
@@ -204,7 +210,7 @@ namespace Configure::Manager {
         Load(stock/ns);
     }
 
-    void Warehouse::RemoveCabinet(const std::string &name) {
+    void Warehouse::RemoveCabinet(const std::string& name) {
         const auto iter = mCabinets.find(name);
         if (iter==mCabinets.end()) return;
         mCabinets.erase(iter);
@@ -216,8 +222,71 @@ namespace Configure::Manager {
         return &i->second;
     }
 
+    void Warehouse::UpdateCabinet(const std::string& name) {
+        if (const auto cab = GetCabinet(name); cab) {
+            cab->UpdateUnsafe();
+            ReloadWorkspaces();
+        }
+    }
+
+    void Warehouse::UpdateCabinets() {
+        std::vector<std::nested_exception> transaction{};
+        try {
+            std::vector<std::nested_exception> updateErr{};
+            for (auto& x : mCabinets) {
+                try { x.second.UpdateUnsafe(); }
+                catch (...) { updateErr.emplace_back(); }
+            }
+            if (!updateErr.empty()) throw Utils::AggregateException(std::move(updateErr));
+        }
+        catch (...) {
+            try { std::throw_with_nested(std::runtime_error("Failures during update:")); }
+            catch (...) { transaction.emplace_back(); }
+        }
+        try { ReloadWorkspaces(); }
+        catch (...) {
+            try { std::throw_with_nested(std::runtime_error("Failures during reload:")); }
+            catch (...) { transaction.emplace_back(); }
+        }
+        if (!transaction.empty()) throw Utils::AggregateException(std::move(transaction));
+    }
+
+    void Warehouse::RemoveWorkspace(const std::string& name) {
+        const auto iter = mWorkspaces.find(name);
+        if (iter==mWorkspaces.end()) return;
+        mWorkspaces.erase(iter);
+    }
+
+    Workspace* Warehouse::GetWorkspace(const std::string& name) {
+        const auto i = mWorkspaces.find(name);
+        if (i==mWorkspaces.end()) return nullptr;
+        return &i->second;
+    }
+
     void Warehouse::Load(const std::filesystem::path& path) {
         auto cab = Cabinet::Open(path);
         mCabinets.insert_or_assign(cab.Namespace(), std::move(cab));
+    }
+
+    void Warehouse::ReloadWorkspaces() {
+        std::vector<std::nested_exception> exceptions{};
+        for (auto& m : mWorkspaces) {
+            try { m.second.Reload(); }
+            catch (...) { exceptions.emplace_back(); }
+        }
+        if (!exceptions.empty()) throw Utils::AggregateException(std::move(exceptions));
+    }
+
+    void Workspace::Reload() {
+
+    }
+
+    void Workspace::Update() {
+        std::vector<std::nested_exception> exceptions{};
+        for (auto& m : mList) {
+            try { std::get<1>(m)->Update(); }
+            catch (...) { exceptions.emplace_back(); }
+        }
+        if (!exceptions.empty()) throw Utils::AggregateException(std::move(exceptions));
     }
 }

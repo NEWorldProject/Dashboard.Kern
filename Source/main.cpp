@@ -5,8 +5,12 @@ int main() {
     using namespace Configure::Manager;
     std::string path;
     std::getline(std::cin, path);
-    //auto repo = Cabinet::Fetch(path+"/home", "https://github.com/NEWorldProject/Cabinet");
-    auto repo = Cabinet::Open(path+"/home");
-    repo.Get("NRT")->Update();
-    std::cout << repo.Namespace() << std::endl;
+    auto warehouse = Warehouse(path+"/home");
+    std::cout << "Repo loaded, updating" << std::endl;
+    if (const auto repo = warehouse.GetCabinet("cn.newinfinideas.neworld"); !repo) {
+        std::cout << "Fetching Cabinet" << std::endl;
+        warehouse.ImportCabinet("https://github.com/NEWorldProject/Cabinet");
+    }
+    warehouse.GetCabinet("cn.newinfinideas.neworld")->Get("NRT")->Update();
+    std::cout << "Nrt Update Complete" << std::endl;
 }
