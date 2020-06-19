@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <unordered_map>
 #include <exception>
+
 namespace Configure::Manager {
 	using SysSec = std::chrono::time_point<std::chrono::system_clock, std::chrono::seconds>;
 
@@ -22,6 +23,7 @@ namespace Configure::Manager {
 		[[nodiscard]] SysSec LastCommit() const noexcept { return mLastCommit; }
 		void Update();
 		void Destruct();
+		[[nodiscard]] std::filesystem::path GetContentPath() const;
 	private:
 		bool mIsFull;
 		std::string mId, mUri, mDisplay;
@@ -48,6 +50,7 @@ namespace Configure::Manager {
 
 	class Workspace {
 	public:
+	    Workspace(const std::filesystem::path& home);
 	    void Reload();
 	    void Update();
 	private:
@@ -72,7 +75,7 @@ namespace Configure::Manager {
         void UpdateCabinet(const std::string& name);
         void UpdateCabinets();
         template <class Fn> void EnumerateCabinets(Fn fn) { for (auto&& [_, x]: mCabinets) fn(x); }
-        void CreateWorkspace(const CheckoutArgs& uri);
+        void CreateWorkspace(const CheckoutArgs& args);
         void RemoveWorkspace(const std::string& name);
         [[nodiscard]] Workspace* GetWorkspace(const std::string& name);
         template <class Fn> void EnumerateWorkspaces(Fn fn) { for (auto&& [_, x]: mWorkspaces) fn(x); }
@@ -82,5 +85,7 @@ namespace Configure::Manager {
         std::filesystem::path mHome;
         std::unordered_map<std::string, Cabinet> mCabinets;
         std::unordered_map<std::string, Workspace> mWorkspaces;
-	};
+        std::pair<std::string, Module*> ResolveModuleName(const std::string& name);
+        std::pair<std::string, Module*> SearchNamespacedId(const std::string& name);
+    };
 }

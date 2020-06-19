@@ -1,36 +1,14 @@
-#include "Manager.h"
-#include "Json/Json.h"
-#include "date/date.h"
 #include "Git2/Repository.h"
+#include "Utils/Exception.h"
+#include "Json/Json.h"
+#include <date/date.h>
 #include <sstream>
 #include <unordered_set>
-#include "Utils/Exception.h"
+#include "InterOp.h"
+
+using namespace Configure::Manager::InterOp;
 
 namespace {
-    // Path Notes
-    constexpr std::string_view RepoPath{"Repo"};
-    constexpr std::string_view InfoPath{"info.json"};
-    constexpr std::string_view BuildPath{"BuildTree"};
-    constexpr std::string_view ModulesPath{"Modules"};
-    constexpr std::string_view WarehouseDir{".nwds"};
-    constexpr std::string_view WarehouseTempDir{"Temp"};
-    constexpr std::string_view WarehouseStockDir{"Stock"};
-    // Messages
-    constexpr std::string_view MsgCabinetCorrupted{"Cabinet Corrupted"};
-    constexpr std::string_view MsgCabinetConflict{"Cabinet with the same name already exists"};
-    constexpr std::string_view MsgModuleDirMissing{"Module Directory Missing"};
-    constexpr std::string_view MsgModuleDirCorrupted{"Module Directory Corrupted"};
-    constexpr std::string_view MsgModuleInfoCorrupted{"Module Internal Info File Corrupted"};
-    // Id Key
-    constexpr std::string_view KeyModuleInfoId{"id"};
-    constexpr std::string_view KeyModuleInfoUri{"uri"};
-    constexpr std::string_view KeyModuleInfoDisplay{"usr"};
-    constexpr std::string_view KeyModuleInfoLPull{"lup"};
-    constexpr std::string_view KeyModuleInfoLCommit{"lcm"};
-    constexpr std::string_view KeyCabinetNamespace{"ns"};
-
-    [[noreturn]] void Corruption(std::string_view message) { throw std::runtime_error(message.data()); }
-
     auto GetDate(const std::string& date) {
         std::istringstream in{date};
         date::sys_seconds tp;
@@ -77,6 +55,7 @@ namespace Configure::Manager {
 
     void Module::Update() {
         MakeSureRepoExists(mHome, mUri);
+        mIsFull=true;
         auto repo = Git2::Repository::Open(mHome/RepoPath);
         repo.PullAuto({"DWVoid", "yshliu0321@icloud.com"}); // TODO: Add a config option for this
         mLastUpdate = std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
@@ -86,12 +65,7 @@ namespace Configure::Manager {
         if (std::filesystem::exists(mHome)) std::filesystem::remove_all(mHome);
     }
 
-    static void ValidateName(std::string_view view) {
-        static constexpr std::string_view charNotAllowed{"#<$+%>!`&*'\"|{?=}/\\: @"};
-        if (const auto pos = view.find_first_of(charNotAllowed); pos!=std::string_view::npos) {
-            throw std::runtime_error(std::string("Invalid character '")+view[pos]+"' found in string");
-        }
-    }
+    std::filesystem::path Module::GetContentPath() const { return mHome/RepoPath; }
 
     void DoValidation(const nlohmann::json& list) {
         auto validate = [list = std::unordered_set<std::string>()](const std::string& val) mutable {
@@ -169,112 +143,9 @@ namespace Configure::Manager {
         return &i->second;
     }
 
-    Warehouse::Warehouse(const std::filesystem::path& home) : mHome(home) {
-        const auto base = home/WarehouseDir;
-        std::filesystem::create_directories(base);
-        std::filesystem::create_directories(base/WarehouseTempDir);
-        std::filesystem::create_directories(base/WarehouseStockDir);
-        for (auto&& x: std::filesystem::directory_iterator(base/WarehouseStockDir)) {
-            if (!x.is_directory()) continue;
-            try {
-                Load(x);
-            }
-            catch (...) {
-                //ignore
-            }
-        }
-    }
-
-    void Warehouse::ImportCabinet(const std::string& uri) {
-        std::string ns{};
-        const auto base = mHome/WarehouseDir;
-        const auto temp = base/WarehouseTempDir;
-        const auto stock = base/WarehouseStockDir;
-        const auto tmpTarget = temp/"FetchProgress";
-        // fetch the expand the target cabinet into a temp directory as we ho not know the name yet.
-        // if this step succeeds, we are sure that the target cabinet is in good state
-        try {
-            const auto cab = Cabinet::Fetch(tmpTarget, uri);
-            // scan the namespace name against the list. if there is conflict, throw a runtime error with message
-            if (mCabinets.find(cab.Namespace())!=mCabinets.end()) Corruption(MsgCabinetConflict);
-            // move the cab
-            ns = cab.Namespace();
-            std::filesystem::rename(tmpTarget, stock/ns);
-        }
-        catch (...) {
-            // in-case of exception, drop the temp cab dir
-            std::filesystem::remove_all(tmpTarget);
-            throw;
-        }
-        // finally, load the cabinet into the list
-        Load(stock/ns);
-    }
-
-    void Warehouse::RemoveCabinet(const std::string& name) {
-        const auto iter = mCabinets.find(name);
-        if (iter==mCabinets.end()) return;
-        mCabinets.erase(iter);
-    }
-
-    Cabinet* Warehouse::GetCabinet(const std::string& name) {
-        const auto i = mCabinets.find(name);
-        if (i==mCabinets.end()) return nullptr;
-        return &i->second;
-    }
-
-    void Warehouse::UpdateCabinet(const std::string& name) {
-        if (const auto cab = GetCabinet(name); cab) {
-            cab->UpdateUnsafe();
-            ReloadWorkspaces();
-        }
-    }
-
-    void Warehouse::UpdateCabinets() {
-        std::vector<std::nested_exception> transaction{};
-        try {
-            std::vector<std::nested_exception> updateErr{};
-            for (auto& x : mCabinets) {
-                try { x.second.UpdateUnsafe(); }
-                catch (...) { updateErr.emplace_back(); }
-            }
-            if (!updateErr.empty()) throw Utils::AggregateException(std::move(updateErr));
-        }
-        catch (...) {
-            try { std::throw_with_nested(std::runtime_error("Failures during update:")); }
-            catch (...) { transaction.emplace_back(); }
-        }
-        try { ReloadWorkspaces(); }
-        catch (...) {
-            try { std::throw_with_nested(std::runtime_error("Failures during reload:")); }
-            catch (...) { transaction.emplace_back(); }
-        }
-        if (!transaction.empty()) throw Utils::AggregateException(std::move(transaction));
-    }
-
-    void Warehouse::RemoveWorkspace(const std::string& name) {
-        const auto iter = mWorkspaces.find(name);
-        if (iter==mWorkspaces.end()) return;
-        mWorkspaces.erase(iter);
-    }
-
-    Workspace* Warehouse::GetWorkspace(const std::string& name) {
-        const auto i = mWorkspaces.find(name);
-        if (i==mWorkspaces.end()) return nullptr;
-        return &i->second;
-    }
-
     void Warehouse::Load(const std::filesystem::path& path) {
         auto cab = Cabinet::Open(path);
         mCabinets.insert_or_assign(cab.Namespace(), std::move(cab));
-    }
-
-    void Warehouse::ReloadWorkspaces() {
-        std::vector<std::nested_exception> exceptions{};
-        for (auto& m : mWorkspaces) {
-            try { m.second.Reload(); }
-            catch (...) { exceptions.emplace_back(); }
-        }
-        if (!exceptions.empty()) throw Utils::AggregateException(std::move(exceptions));
     }
 
     void Workspace::Reload() {

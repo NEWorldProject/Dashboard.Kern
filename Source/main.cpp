@@ -13,4 +13,8 @@ int main() {
     }
     warehouse.GetCabinet("cn.newinfinideas.neworld")->Get("NRT")->Update();
     std::cout << "Nrt Update Complete" << std::endl;
+    Warehouse::CheckoutArgs args;
+    args.Name = "test";
+    args.Modules.push_back({"NRT"});
+    warehouse.CreateWorkspace(args);
 }
