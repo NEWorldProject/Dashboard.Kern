@@ -1,10 +1,9 @@
-#include "Git2/Repository.h"
-#include "Utils/Exception.h"
-#include "Json/Json.h"
 #include <date/date.h>
 #include <sstream>
 #include <unordered_set>
 #include "InterOp.h"
+#include "Json/Json.h"
+#include "Git2/Repository.h"
 
 using namespace Configure::Manager::InterOp;
 
@@ -146,18 +145,5 @@ namespace Configure::Manager {
     void Warehouse::Load(const std::filesystem::path& path) {
         auto cab = Cabinet::Open(path);
         mCabinets.insert_or_assign(cab.Namespace(), std::move(cab));
-    }
-
-    void Workspace::Reload() {
-
-    }
-
-    void Workspace::Update() {
-        std::vector<std::nested_exception> exceptions{};
-        for (auto& m : mList) {
-            try { std::get<1>(m)->Update(); }
-            catch (...) { exceptions.emplace_back(); }
-        }
-        if (!exceptions.empty()) throw Utils::AggregateException(std::move(exceptions));
     }
 }

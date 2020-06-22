@@ -94,6 +94,7 @@ namespace Configure::Manager {
     void Warehouse::RemoveWorkspace(const std::string& name) {
         const auto iter = mWorkspaces.find(name);
         if (iter==mWorkspaces.end()) return;
+        iter->second.Destruct();
         mWorkspaces.erase(iter);
     }
 
@@ -104,39 +105,8 @@ namespace Configure::Manager {
     }
 
     void Warehouse::CreateWorkspace(const Warehouse::CheckoutArgs& args) {
-        ValidateName(args.Name);
-        const auto ws = mHome/WarehouseDir/WarehouseWorkspaceDir/args.Name;
-        std::filesystem::create_directories(ws);
-        // collect the information of all requests
-        std::unordered_map<std::string, bool> flags{};
-        std::unordered_map<std::string, std::pair<std::string, Module*>> collected{};
-        for (auto&&[name, flag] : args.Modules) {
-            if (collected.find(name)!=collected.end()) {
-                throw std::runtime_error("Args Corrupted: Duplicated Module Id");
-            }
-            if (name.find("::")==std::string::npos) {
-                collected.insert_or_assign(name, ResolveModuleName(name));
-            }
-            else {
-                collected.insert_or_assign(name, SearchNamespacedId(name));
-            }
-            flags[name] = flag;
-        }
-        nlohmann::json list{};
-        auto& ref = list["linked"] = nlohmann::json::array();
-        std::filesystem::create_directories(mHome/args.Name);
-        for (auto&[k, v]: collected) {
-            auto part = nlohmann::json::object();
-            auto flag = flags[k];
-            part["uri"] = v.first;
-            part["flag"] = flag;
-            ref.push_back(part);
-            auto pt = v.first;
-            std::filesystem::create_directory_symlink(
-                    v.second->GetContentPath(),
-                    (flag ? mHome/args.Name : ws)/k
-            );
-        }
+        auto create = WorkspaceCheckoutHelper(*this, mHome, args);
+        mWorkspaces.insert_or_assign(args.Name, std::move(create));
     }
 
     void Warehouse::ReloadWorkspaces() {
@@ -146,37 +116,5 @@ namespace Configure::Manager {
             catch (...) { exceptions.emplace_back(); }
         }
         if (!exceptions.empty()) throw Utils::AggregateException(std::move(exceptions));
-    }
-
-    std::pair<std::string, Module*> Warehouse::ResolveModuleName(const std::string& name) {
-        Module* target = nullptr;
-        std::string uri{};
-        EnumerateCabinets([&target, name = &name, &uri](Cabinet& cab) {
-            const auto search = cab.Get(*name);
-            if (search) {
-                const auto thisId = cab.Namespace()+"::"+search->Id();
-                if (!target) {
-                    target = search;
-                    uri = thisId;
-                }
-                else {
-                    throw std::runtime_error("conflict for name "+*name+"between "+uri+" and "+thisId); //NOLINT
-                }
-            }
-        });
-        if (!target) throw std::runtime_error("Module not found:"+name);
-        return {std::move(uri), target};
-    }
-
-    std::pair<std::string, Module*> Warehouse::SearchNamespacedId(const std::string& name) {
-        const auto pos = name.find("::");
-        const auto ns = name.substr(0, pos);
-        const auto id = name.substr(pos+2);
-        if (const auto cab = GetCabinet(ns); cab) {
-            if (const auto md = cab->Get(id); md) {
-                return {name, md};
-            }
-        }
-        throw std::runtime_error("Module not found:"+name);
     }
 }

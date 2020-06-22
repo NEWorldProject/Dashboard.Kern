@@ -35,4 +35,10 @@ namespace Configure::Manager::InterOp {
     }
 
     [[noreturn]] inline void Corruption(std::string_view message) { throw std::runtime_error(message.data()); }
+
+    Workspace WorkspaceCheckoutHelper(
+            Warehouse& warehouse,
+            const std::filesystem::path& home,
+            const Warehouse::CheckoutArgs& args
+    );
 }

@@ -50,9 +50,10 @@ namespace Configure::Manager {
 
 	class Workspace {
 	public:
-	    Workspace(const std::filesystem::path& home);
+	    explicit Workspace(const std::filesystem::path& home);
 	    void Reload();
 	    void Update();
+	    void Destruct();
 	private:
 	    std::vector<std::tuple<std::string, Module*, bool>> mList;
 	};
@@ -85,7 +86,5 @@ namespace Configure::Manager {
         std::filesystem::path mHome;
         std::unordered_map<std::string, Cabinet> mCabinets;
         std::unordered_map<std::string, Workspace> mWorkspaces;
-        std::pair<std::string, Module*> ResolveModuleName(const std::string& name);
-        std::pair<std::string, Module*> SearchNamespacedId(const std::string& name);
     };
 }
